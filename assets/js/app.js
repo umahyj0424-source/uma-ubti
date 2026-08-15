@@ -9,13 +9,16 @@
     consideration:'배려성', independence:'독립성', perfectionism:'완벽주의', competitiveness:'승부집착', responsibility:'책임감'
   };
 
+  const DEFAULT_MATCH_SETTINGS = { enabled:true, topK:5, topMultiplier:2.0, neutralWeight:0.35, strengthPower:1.25 };
   const clone = obj => JSON.parse(JSON.stringify(obj));
-  const defaults = { characters: clone(window.UMA_CHARACTERS), questions: clone(window.UMA_DEFAULT_QUESTIONS) };
+  const defaults = { characters: clone(window.UMA_CHARACTERS), questions: clone(window.UMA_DEFAULT_QUESTIONS), settings: clone(DEFAULT_MATCH_SETTINGS) };
   let state = loadState();
   let answers = {};
   let currentQuestionEditId = 1;
   let changedCharacterAxes = new Set();
   let lastResult = null;
+  const MOBILE_TEST_QUERY = window.matchMedia('(max-width: 560px)');
+  let mobileQuestionIndex = 0;
 
   function loadState(){
     try{
@@ -23,6 +26,7 @@
       if(!raw) return clone(defaults);
       const parsed = JSON.parse(raw);
       if(!Array.isArray(parsed.characters) || !Array.isArray(parsed.questions)) return clone(defaults);
+      parsed.settings = {...DEFAULT_MATCH_SETTINGS, ...(parsed.settings||{})};
       return parsed;
     }catch(e){ console.warn(e); return clone(defaults); }
   }
@@ -47,18 +51,86 @@
   document.getElementById('axis-chips').innerHTML = AXES.map(a=>`<span class="chip">${esc(a.label)}</span>`).join('');
 
   // ---------- test ----------
+  function isMobileTest(){ return MOBILE_TEST_QUERY.matches; }
+  function scaleOptions(q){
+    const labels={
+      1:{symbol:'◀◀',word:'매우',aria:'왼쪽 선택지를 매우 선호'},
+      2:{symbol:'◀',word:'조금',aria:'왼쪽 선택지를 조금 선호'},
+      3:{symbol:'●',word:'중간',aria:'둘 다 비슷하거나 중간'},
+      4:{symbol:'▶',word:'조금',aria:'오른쪽 선택지를 조금 선호'},
+      5:{symbol:'▶▶',word:'매우',aria:'오른쪽 선택지를 매우 선호'}
+    };
+    return [1,2,3,4,5].map(v=>{
+      const meta=labels[v];
+      return `<div class="scale-option"><input type="radio" name="q${q.id}" id="q${q.id}-${v}" value="${v}" ${answers[q.id]===v?'checked':''}><label for="q${q.id}-${v}" title="${meta.aria}" aria-label="${meta.aria}"><span class="scale-symbol">${meta.symbol}</span><span class="scale-word">${meta.word}</span></label></div>`;
+    }).join('');
+  }
+  function questionCard(q,idx,mobile=false){
+    return `<article class="question-card card ${mobile?'mobile-single-question':''}" data-qid="${q.id}">
+      <div class="question-title"><span class="q-no">Q${idx+1}</span><h3>${esc(q.prompt)}</h3></div>
+      <div class="choice-scale">
+        <div class="choice-label choice-left"><span class="choice-tag">A</span><span>${esc(q.left)}</span></div>
+        ${scaleOptions(q)}
+        <div class="choice-label choice-right"><span class="choice-tag">B</span><span>${esc(q.right)}</span></div>
+      </div>
+    </article>`;
+  }
+  function scrollQuestionIntoView(){
+    if(!isMobileTest()) return;
+    requestAnimationFrame(()=>{
+      const target=document.getElementById('question-list');
+      const y=target.getBoundingClientRect().top + window.scrollY - 12;
+      window.scrollTo({top:y,behavior:'smooth'});
+    });
+  }
+  function bindQuestionInputs(list){
+    list.querySelectorAll('input[type=radio]').forEach(input=>input.addEventListener('change',e=>{
+      const qid = Number(e.target.name.slice(1));
+      answers[qid]=Number(e.target.value);
+      updateProgress();
+      if(isMobileTest()){
+        const card=e.target.closest('.question-card');
+        card?.classList.add('just-answered');
+        window.setTimeout(()=>{
+          if(mobileQuestionIndex < state.questions.length-1){
+            mobileQuestionIndex += 1;
+            renderQuestions();
+            scrollQuestionIntoView();
+          }else{
+            renderQuestions();
+            scrollQuestionIntoView();
+          }
+        },220);
+      }
+    }));
+  }
   function renderQuestions(){
     const list = document.getElementById('question-list');
-    list.innerHTML = state.questions.map((q,idx)=>{
-      const options=[1,2,3,4,5].map(v=>`<div class="scale-option"><input type="radio" name="q${q.id}" id="q${q.id}-${v}" value="${v}" ${answers[q.id]===v?'checked':''}><label for="q${q.id}-${v}">${v===3?'중간':v}</label></div>`).join('');
-      return `<article class="question-card card" data-qid="${q.id}">
-        <div class="question-title"><span class="q-no">Q${idx+1}</span><h3>${esc(q.prompt)}</h3></div>
-        <div class="choice-scale"><div class="choice-label">${esc(q.left)}</div>${options}<div class="choice-label right">${esc(q.right)}</div></div>
-      </article>`;
-    }).join('');
-    list.querySelectorAll('input[type=radio]').forEach(input=>input.addEventListener('change',e=>{
-      const qid = Number(e.target.name.slice(1)); answers[qid]=Number(e.target.value); updateProgress();
-    }));
+    if(!state.questions.length){ list.innerHTML=''; updateProgress(); return; }
+    if(isMobileTest()){
+      mobileQuestionIndex=clamp(mobileQuestionIndex,0,state.questions.length-1);
+      const q=state.questions[mobileQuestionIndex];
+      const isFirst=mobileQuestionIndex===0, isLast=mobileQuestionIndex===state.questions.length-1;
+      list.innerHTML=`<div class="mobile-question-stage">
+        ${questionCard(q,mobileQuestionIndex,true)}
+        <div class="mobile-question-nav">
+          <button type="button" class="mobile-nav-btn" id="mobile-prev" ${isFirst?'disabled':''}>← 이전 질문</button>
+          <span class="mobile-current">${mobileQuestionIndex+1} / ${state.questions.length}</span>
+          <button type="button" class="mobile-nav-btn" id="mobile-next" ${isLast?'disabled':''}>다음 질문 →</button>
+        </div>
+        <p class="mobile-auto-hint">선택하면 자동으로 다음 질문으로 넘어갑니다.</p>
+      </div>`;
+      bindQuestionInputs(list);
+      document.getElementById('mobile-prev')?.addEventListener('click',()=>{
+        if(mobileQuestionIndex>0){ mobileQuestionIndex--; renderQuestions(); scrollQuestionIntoView(); }
+      });
+      document.getElementById('mobile-next')?.addEventListener('click',()=>{
+        if(mobileQuestionIndex<state.questions.length-1){ mobileQuestionIndex++; renderQuestions(); scrollQuestionIntoView(); }
+      });
+    }else{
+      list.innerHTML = state.questions.map((q,idx)=>questionCard(q,idx,false)).join('');
+      bindQuestionInputs(list);
+    }
     updateProgress();
   }
   function updateProgress(){
@@ -70,6 +142,7 @@
     const remain=total-done;
     document.getElementById('unanswered-count').textContent=remain?`${remain}문항 남음`:'모든 문항 완료';
     document.getElementById('calculate-result').disabled=remain!==0;
+    document.querySelector('.sticky-submit')?.classList.toggle('ready',remain===0);
   }
   document.getElementById('calculate-result').addEventListener('click',()=>{
     lastResult = calculateResult();
@@ -102,21 +175,44 @@
     return {vector,coverage};
   }
 
+  function preferenceAxisWeights(vector){
+    const cfg={...DEFAULT_MATCH_SETTINGS,...(state.settings||{})};
+    if(!cfg.enabled){
+      return {weights:Object.fromEntries(AXES.map(a=>[a.key,1])), topKeys:[]};
+    }
+    const strengthRows=AXES.map(a=>({key:a.key,strength:clamp(Math.abs(Number(vector[a.key])-2)/2,0,1)}))
+      .sort((a,b)=>b.strength-a.strength);
+    const topKeys=strengthRows.slice(0,clamp(Math.round(Number(cfg.topK)||0),0,AXES.length)).map(x=>x.key);
+    const topSet=new Set(topKeys);
+    const neutralWeight=clamp(Number(cfg.neutralWeight)||0.35,0.05,1);
+    const strengthPower=clamp(Number(cfg.strengthPower)||1.25,0.3,3);
+    const topMultiplier=clamp(Number(cfg.topMultiplier)||2,1,5);
+    const weights={};
+    strengthRows.forEach(({key,strength})=>{
+      let w=neutralWeight+(1-neutralWeight)*Math.pow(strength,strengthPower);
+      if(topSet.has(key)) w*=topMultiplier;
+      weights[key]=w;
+    });
+    return {weights,topKeys};
+  }
+
   function calculateResult(){
     const {vector,coverage}=preferenceVector();
+    const {weights:axisWeights,topKeys}=preferenceAxisWeights(vector);
     const ranked=state.characters.map(c=>{
       let sum=0, wsum=0;
       AXES.forEach(a=>{
         const diff=(Number(c.traits[a.key])-vector[a.key])/4;
         const conf=Number(c.confidence?.[a.key] ?? 0.7);
-        const w=0.75+0.25*conf; // confidence is a small modifier, not a veto
+        const confidenceWeight=0.75+0.25*conf; // confidence is a small modifier, not a veto
+        const w=confidenceWeight*(axisWeights[a.key]||1);
         sum += w*diff*diff; wsum += w;
       });
       const rms=Math.sqrt(sum/wsum);
       const similarity=clamp((1-rms)*100,0,100);
       return {...c, similarity, distance:rms};
     }).sort((a,b)=>b.similarity-a.similarity);
-    return {vector,coverage,ranked};
+    return {vector,coverage,ranked,axisWeights,topKeys};
   }
 
   // ---------- results ----------
@@ -127,17 +223,21 @@
     const best=lastResult.ranked[0];
     document.getElementById('best-name').textContent=best.name;
     document.getElementById('best-score').textContent=best.similarity.toFixed(1)+'%';
-    document.getElementById('best-summary').textContent=`142명 중 선호 성향 벡터와 가장 가까운 캐릭터입니다. 2위와의 차이는 ${(best.similarity-lastResult.ranked[1].similarity).toFixed(1)}%p.`;
+    const cfg={...DEFAULT_MATCH_SETTINGS,...(state.settings||{})};
+    const weightedText=cfg.enabled?` 강한 선호 TOP ${cfg.topK}개 축은 최대 ${Number(cfg.topMultiplier).toFixed(1)}배 추가 반영했습니다.`:'';
+    document.getElementById('best-summary').textContent=`142명 중 선호 성향 벡터와 가장 가까운 캐릭터입니다. 2위와의 차이는 ${(best.similarity-lastResult.ranked[1].similarity).toFixed(1)}%p.${weightedText}`;
     document.getElementById('ranking-list').innerHTML=lastResult.ranked.slice(0,10).map((c,i)=>`<div class="rank-row"><span class="rank-no">${i+1}</span><span class="rank-name">${esc(c.name)}</span><span class="rank-score">${c.similarity.toFixed(1)}%</span></div>`).join('');
+    const topSet=new Set(lastResult.topKeys||[]);
     document.getElementById('trait-compare').innerHTML=AXES.map(a=>{
       const u=lastResult.vector[a.key], c=best.traits[a.key];
-      return `<div class="trait-row"><span class="trait-name">${esc(a.label)}</span><div class="dual-bars"><div class="bar-track"><div class="bar-user" style="width:${u/4*100}%"></div></div><div class="bar-track"><div class="bar-char" style="width:${c/4*100}%"></div></div></div><span class="trait-values">${u.toFixed(1)} / ${Number(c).toFixed(0)}</span></div>`;
+      const weighted=topSet.has(a.key);
+      return `<div class="trait-row ${weighted?'weighted-axis':''}"><span class="trait-name">${esc(a.label)}${weighted?'<em class="weighted-badge">강한 취향</em>':''}</span><div class="dual-bars"><div class="bar-track"><div class="bar-user" style="width:${u/4*100}%"></div></div><div class="bar-track"><div class="bar-char" style="width:${c/4*100}%"></div></div></div><span class="trait-values">${u.toFixed(1)} / ${Number(c).toFixed(0)}</span></div>`;
     }).join('');
     const reasons=AXES.map(a=>{
       const u=lastResult.vector[a.key], c=best.traits[a.key];
       const closeness=1-Math.abs(u-c)/4;
       const distinct=0.45+0.55*Math.max(Math.abs(u-2),Math.abs(c-2))/2;
-      return {label:a.label,u,c,score:closeness*distinct};
+      return {label:a.label,u,c,score:closeness*distinct*(lastResult.axisWeights?.[a.key]||1)};
     }).sort((a,b)=>b.score-a.score).slice(0,6);
     document.getElementById('reason-list').innerHTML=reasons.map(r=>`<span class="reason-pill">${esc(r.label)} · 선호 ${r.u.toFixed(1)} / ${Number(r.c).toFixed(0)}</span>`).join('');
   }
@@ -148,7 +248,7 @@
     document.querySelectorAll('.admin-panel').forEach(p=>p.classList.toggle('active',p.id===`admin-${btn.dataset.admin}`));
   }));
 
-  function renderAdmin(){ renderCharacterSelect(); renderCharacterEditor(); renderQuestionAdminList(); renderQuestionEditor(); }
+  function renderAdmin(){ renderCharacterSelect(); renderCharacterEditor(); renderQuestionAdminList(); renderQuestionEditor(); renderMatchSettings(); }
   function renderCharacterSelect(filter=''){
     const select=document.getElementById('character-select');
     const current=select.value;
@@ -201,6 +301,31 @@
     });
   }
 
+
+  function renderMatchSettings(){
+    state.settings={...DEFAULT_MATCH_SETTINGS,...(state.settings||{})};
+    const cfg=state.settings;
+    const enabled=document.getElementById('match-weight-enabled');
+    if(!enabled) return;
+    enabled.checked=!!cfg.enabled;
+    document.getElementById('match-top-k').value=cfg.topK;
+    document.getElementById('match-top-multiplier').value=cfg.topMultiplier;
+    document.getElementById('match-neutral-weight').value=cfg.neutralWeight;
+    document.getElementById('match-strength-power').value=cfg.strengthPower;
+  }
+  document.getElementById('save-match-settings').addEventListener('click',()=>{
+    state.settings={
+      enabled:document.getElementById('match-weight-enabled').checked,
+      topK:clamp(Math.round(Number(document.getElementById('match-top-k').value)||0),0,AXES.length),
+      topMultiplier:clamp(Number(document.getElementById('match-top-multiplier').value)||2,1,5),
+      neutralWeight:clamp(Number(document.getElementById('match-neutral-weight').value)||0.35,0.05,1),
+      strengthPower:clamp(Number(document.getElementById('match-strength-power').value)||1.25,0.3,3)
+    };
+    saveState();
+    if(Object.keys(answers).length===state.questions.length) lastResult=calculateResult(); else lastResult=null;
+    alert('매칭 가중치 설정을 저장했습니다.');
+  });
+
   // ---------- import/export ----------
   function download(name,text,type){ const blob=new Blob([text],{type}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000); }
   document.getElementById('export-json').addEventListener('click',()=>download('uma_preference_match_config.json',JSON.stringify(state,null,2),'application/json'));
@@ -211,7 +336,7 @@
   });
   document.getElementById('import-json').addEventListener('change',async e=>{
     const file=e.target.files[0]; if(!file)return;
-    try{const obj=JSON.parse(await file.text());if(!Array.isArray(obj.characters)||!Array.isArray(obj.questions))throw new Error('형식 오류');state=obj;saveState();lastResult=null;renderQuestions();renderAdmin();alert('JSON 설정을 불러왔습니다.');}catch(err){alert('JSON을 불러오지 못했습니다: '+err.message);} e.target.value='';
+    try{const obj=JSON.parse(await file.text());if(!Array.isArray(obj.characters)||!Array.isArray(obj.questions))throw new Error('형식 오류');state={...obj,settings:{...DEFAULT_MATCH_SETTINGS,...(obj.settings||{})}};saveState();lastResult=null;renderQuestions();renderAdmin();alert('JSON 설정을 불러왔습니다.');}catch(err){alert('JSON을 불러오지 못했습니다: '+err.message);} e.target.value='';
   });
   document.getElementById('import-csv').addEventListener('change',async e=>{
     const file=e.target.files[0]; if(!file)return;
@@ -236,6 +361,17 @@
     if(!confirm('브라우저에 저장된 모든 수정값을 기본값으로 되돌릴까요?'))return;
     state=clone(defaults);saveState();answers={};lastResult=null;renderQuestions();renderAdmin();alert('기본값으로 초기화했습니다.');
   });
+
+  // ---------- responsive test mode ----------
+  const handleTestModeChange=()=>{
+    if(isMobileTest()){
+      const firstUnanswered=state.questions.findIndex(q=>answers[q.id]==null);
+      if(firstUnanswered>=0) mobileQuestionIndex=firstUnanswered;
+    }
+    renderQuestions();
+  };
+  if(MOBILE_TEST_QUERY.addEventListener) MOBILE_TEST_QUERY.addEventListener('change',handleTestModeChange);
+  else if(MOBILE_TEST_QUERY.addListener) MOBILE_TEST_QUERY.addListener(handleTestModeChange);
 
   // ---------- bootstrap ----------
   renderQuestions();

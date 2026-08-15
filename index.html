@@ -52,7 +52,7 @@
         <div>
           <div class="eyebrow">PREFERENCE TEST</div>
           <h2>더 끌리는 쪽을 선택해 주세요</h2>
-          <p>가운데를 선택해도 괜찮습니다. 모든 문항에 답하면 결과 버튼이 활성화됩니다.</p>
+          <p>가운데를 선택해도 괜찮습니다. 모바일에서는 한 문제씩 표시되며, 선택하면 자동으로 다음 문제로 넘어갑니다.</p>
         </div>
         <div class="progress-block">
           <div class="progress-meta"><span id="progress-text">0 / 45</span><span id="progress-percent">0%</span></div>
@@ -84,11 +84,15 @@
 
         <div class="results-grid">
           <section class="card">
-            <div class="section-head"><div><h3>TOP 10</h3><p>15개 축의 가중 거리 기준</p></div></div>
+            <div class="section-head"><div><h3>TOP 10</h3><p>강한 선호축을 더 크게 반영한 가중 거리 기준</p></div></div>
             <div id="ranking-list" class="ranking-list"></div>
           </section>
           <section class="card">
             <div class="section-head"><div><h3>선호 성향 vs 1위 캐릭터</h3><p>막대가 가까울수록 해당 축에서 잘 맞습니다.</p></div></div>
+            <div class="compare-legend" aria-label="막대 범례">
+              <span><i class="legend-swatch legend-user"></i>초록 막대: 내가 선호하는 캐릭터 성향</span>
+              <span><i class="legend-swatch legend-char"></i>회색 막대: 1위 캐릭터의 실제 수치</span>
+            </div>
             <div id="trait-compare" class="trait-compare"></div>
           </section>
         </div>
@@ -109,6 +113,7 @@
       <div class="admin-tabs">
         <button class="admin-tab active" data-admin="characters">캐릭터 수치</button>
         <button class="admin-tab" data-admin="questions">문항 / 가중치</button>
+        <button class="admin-tab" data-admin="matching">매칭 설정</button>
         <button class="admin-tab" data-admin="io">가져오기 / 내보내기</button>
       </div>
 
@@ -131,6 +136,23 @@
           </div>
           <div id="question-editor" class="question-editor"></div>
         </div>
+      </div>
+
+
+      <div id="admin-matching" class="admin-panel card">
+        <div class="section-head"><div><h3>매칭 가중치 설정</h3><p>중립적인 캐릭터가 과도하게 유리해지지 않도록, 사용자의 강한 선호축을 더 크게 반영합니다.</p></div></div>
+        <div class="match-settings-grid">
+          <label class="setting-field"><span>강한 선호축 가중 사용</span><input id="match-weight-enabled" type="checkbox"></label>
+          <label class="setting-field"><span>TOP 선호축 개수</span><input id="match-top-k" type="number" min="0" max="15" step="1"></label>
+          <label class="setting-field"><span>TOP 축 추가 배수</span><input id="match-top-multiplier" type="number" min="1" max="5" step="0.1"></label>
+          <label class="setting-field"><span>중립축 최소 가중치</span><input id="match-neutral-weight" type="number" min="0.05" max="1" step="0.05"></label>
+          <label class="setting-field"><span>선호 강도 곡선</span><input id="match-strength-power" type="number" min="0.3" max="3" step="0.1"></label>
+        </div>
+        <div class="setting-help">
+          <strong>현재 계산 방식</strong>
+          <p>사용자 선호값이 2(중립)에서 멀수록 축 가중치가 커집니다. 그중 가장 강한 TOP 축에는 추가 배수를 곱합니다. 낮은 값(예: 충동성 0을 선호)도 높은 값과 동일하게 강한 취향으로 취급합니다.</p>
+        </div>
+        <button id="save-match-settings" class="primary">매칭 설정 저장</button>
       </div>
 
       <div id="admin-io" class="admin-panel card">
