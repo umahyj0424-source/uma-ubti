@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'umaPreferenceMatchStateV01';
+  const STORAGE_KEY = 'umaPreferenceMatchStateV04';
   const AXES = window.UMA_AXIS_DEFS;
   const AXIS_COLUMNS = {
     cheerful:'명랑도', extroversion:'외향성', selfConfidence:'자기확신', eccentricity:'기행성', playfulness:'장난기',
@@ -9,7 +9,7 @@
     consideration:'배려성', independence:'독립성', perfectionism:'완벽주의', competitiveness:'승부집착', responsibility:'책임감'
   };
 
-  const DEFAULT_MATCH_SETTINGS = { enabled:true, topK:5, topMultiplier:2.0, neutralWeight:0.35, strengthPower:1.25 };
+  const DEFAULT_MATCH_SETTINGS = { enabled:true, topK:6, topMultiplier:1.7, neutralWeight:0.05, strengthPower:1.35, directionalBlend:0.55 };
   const clone = obj => JSON.parse(JSON.stringify(obj));
   const defaults = { characters: clone(window.UMA_CHARACTERS), questions: clone(window.UMA_DEFAULT_QUESTIONS), settings: clone(DEFAULT_MATCH_SETTINGS) };
   let state = loadState();
@@ -153,11 +153,11 @@
     lastResult=calculateResult(); showView('results');
   });
 
-  function preferenceVector(){
+  function preferenceProfile(answerMap=answers){
     const accum={}; AXES.forEach(a=>accum[a.key]={num:0,den:0});
     state.questions.forEach(q=>{
-      const ans=answers[q.id]; if(ans==null) return;
-      const signed=(ans-3)/2; // -1 ... +1
+      const ans=answerMap[q.id]; if(ans==null) return;
+      const signed=(Number(ans)-3)/2; // -1 ... +1 : 어느 방향을 얼마나 선호하는지
       Object.entries(q.effects||{}).forEach(([axis,coef])=>{
         if(!accum[axis]) return;
         const w=(Number(q.weight)||1)*Number(coef||0);
@@ -165,28 +165,30 @@
         accum[axis].den += Math.abs(w);
       });
     });
-    const vector={}, coverage={};
+    const vector={}, direction={}, coverage={};
     AXES.forEach(a=>{
       const x=accum[a.key];
-      const norm=x.den?x.num/x.den:0;
+      const norm=x.den?clamp(x.num/x.den,-1,1):0;
+      direction[a.key]=norm;
       vector[a.key]=clamp(2+2*norm,0,4);
       coverage[a.key]=x.den;
     });
-    return {vector,coverage};
+    return {vector,direction,coverage};
   }
 
-  function preferenceAxisWeights(vector){
+  function preferenceAxisWeights(direction){
     const cfg={...DEFAULT_MATCH_SETTINGS,...(state.settings||{})};
     if(!cfg.enabled){
       return {weights:Object.fromEntries(AXES.map(a=>[a.key,1])), topKeys:[]};
     }
-    const strengthRows=AXES.map(a=>({key:a.key,strength:clamp(Math.abs(Number(vector[a.key])-2)/2,0,1)}))
+    const strengthRows=AXES.map(a=>({key:a.key,strength:clamp(Math.abs(Number(direction[a.key])||0),0,1)}))
       .sort((a,b)=>b.strength-a.strength);
-    const topKeys=strengthRows.slice(0,clamp(Math.round(Number(cfg.topK)||0),0,AXES.length)).map(x=>x.key);
+    const eligible=strengthRows.filter(x=>x.strength>=0.08);
+    const topKeys=eligible.slice(0,clamp(Math.round(Number(cfg.topK)||0),0,AXES.length)).map(x=>x.key);
     const topSet=new Set(topKeys);
-    const neutralWeight=clamp(Number(cfg.neutralWeight)||0.35,0.05,1);
-    const strengthPower=clamp(Number(cfg.strengthPower)||1.25,0.3,3);
-    const topMultiplier=clamp(Number(cfg.topMultiplier)||2,1,5);
+    const neutralWeight=clamp(Number(cfg.neutralWeight)||0.05,0.01,1);
+    const strengthPower=clamp(Number(cfg.strengthPower)||1.35,0.3,3);
+    const topMultiplier=clamp(Number(cfg.topMultiplier)||1.7,1,5);
     const weights={};
     strengthRows.forEach(({key,strength})=>{
       let w=neutralWeight+(1-neutralWeight)*Math.pow(strength,strengthPower);
@@ -196,23 +198,54 @@
     return {weights,topKeys};
   }
 
-  function calculateResult(){
-    const {vector,coverage}=preferenceVector();
-    const {weights:axisWeights,topKeys}=preferenceAxisWeights(vector);
-    const ranked=state.characters.map(c=>{
-      let sum=0, wsum=0;
-      AXES.forEach(a=>{
-        const diff=(Number(c.traits[a.key])-vector[a.key])/4;
-        const conf=Number(c.confidence?.[a.key] ?? 0.7);
-        const confidenceWeight=0.75+0.25*conf; // confidence is a small modifier, not a veto
-        const w=confidenceWeight*(axisWeights[a.key]||1);
-        sum += w*diff*diff; wsum += w;
+  function buildCharacterPercentiles(){
+    const result=new Map();
+    state.characters.forEach(c=>result.set(c.id,{}));
+    AXES.forEach(a=>{
+      const vals=state.characters.map(c=>Number(c.traits[a.key])).sort((x,y)=>x-y);
+      const n=vals.length;
+      state.characters.forEach(c=>{
+        const v=Number(c.traits[a.key]);
+        let less=0,equal=0;
+        vals.forEach(x=>{ if(x<v) less++; else if(x===v) equal++; });
+        const pct=n<=1?0.5:(less+(equal-1)/2)/(n-1); // 동점은 중간순위
+        result.get(c.id)[a.key]=clamp(pct,0,1);
       });
-      const rms=Math.sqrt(sum/wsum);
-      const similarity=clamp((1-rms)*100,0,100);
-      return {...c, similarity, distance:rms};
+    });
+    return result;
+  }
+
+  function rankFromProfile(profile,percentiles=buildCharacterPercentiles()){
+    const {vector,direction,coverage}=profile;
+    const {weights:axisWeights,topKeys}=preferenceAxisWeights(direction);
+    const cfg={...DEFAULT_MATCH_SETTINGS,...(state.settings||{})};
+    const directionalBlend=clamp(Number(cfg.directionalBlend ?? 0.55),0,1);
+    const ranked=state.characters.map(c=>{
+      let directionalSum=0, targetSquared=0, wsum=0;
+      AXES.forEach(a=>{
+        const pref=Number(direction[a.key])||0;
+        const pct=percentiles.get(c.id)?.[a.key] ?? 0.5;
+        const directionalAlignment=Math.abs(pref)<1e-7?0.5:(pref>0?pct:1-pct);
+        const diff=(Number(c.traits[a.key])-Number(vector[a.key]))/4;
+        const conf=Number(c.confidence?.[a.key] ?? 0.7);
+        const confidenceWeight=0.85+0.15*conf;
+        const w=confidenceWeight*(axisWeights[a.key]||1);
+        directionalSum += w*directionalAlignment;
+        targetSquared += w*diff*diff;
+        wsum += w;
+      });
+      const directionalScore=wsum?directionalSum/wsum:0.5;
+      const targetScore=wsum?1-Math.sqrt(targetSquared/wsum):0;
+      const combined=directionalBlend*directionalScore+(1-directionalBlend)*targetScore;
+      const similarity=clamp(combined*100,0,100);
+      return {...c, similarity, directionalScore, targetScore};
     }).sort((a,b)=>b.similarity-a.similarity);
-    return {vector,coverage,ranked,axisWeights,topKeys};
+    const clarity=AXES.reduce((sum,a)=>sum+Math.abs(Number(direction[a.key])||0),0)/AXES.length;
+    return {vector,direction,coverage,ranked,axisWeights,topKeys,directionalBlend,percentiles,clarity};
+  }
+
+  function calculateResult(answerMap=answers,percentiles=null){
+    return rankFromProfile(preferenceProfile(answerMap),percentiles||buildCharacterPercentiles());
   }
 
   // ---------- results ----------
@@ -224,8 +257,9 @@
     document.getElementById('best-name').textContent=best.name;
     document.getElementById('best-score').textContent=best.similarity.toFixed(1)+'%';
     const cfg={...DEFAULT_MATCH_SETTINGS,...(state.settings||{})};
-    const weightedText=cfg.enabled?` 강한 선호 TOP ${cfg.topK}개 축은 최대 ${Number(cfg.topMultiplier).toFixed(1)}배 추가 반영했습니다.`:'';
-    document.getElementById('best-summary').textContent=`142명 중 선호 성향 벡터와 가장 가까운 캐릭터입니다. 2위와의 차이는 ${(best.similarity-lastResult.ranked[1].similarity).toFixed(1)}%p.${weightedText}`;
+    const weightedText=cfg.enabled?` 강한 선호 TOP ${cfg.topK}개 축을 최대 ${Number(cfg.topMultiplier).toFixed(1)}배 반영하고, 방향 선호 ${Math.round(Number(cfg.directionalBlend??0.55)*100)}% + 목표 수치 ${100-Math.round(Number(cfg.directionalBlend??0.55)*100)}%로 계산했습니다.`:'';
+    const clarityText=lastResult.clarity<0.18?' 응답이 전반적으로 중립에 가까워 결과 변별력이 낮은 편입니다.':` 취향 선명도는 ${Math.round(lastResult.clarity*100)}%입니다.`;
+    document.getElementById('best-summary').textContent=`142명 중 강하게 끌린 성향의 방향과 원하는 정도를 함께 비교해 가장 높은 캐릭터입니다. 2위와의 차이는 ${(best.similarity-lastResult.ranked[1].similarity).toFixed(1)}%p.${clarityText}${weightedText}`;
     document.getElementById('ranking-list').innerHTML=lastResult.ranked.slice(0,10).map((c,i)=>`<div class="rank-row"><span class="rank-no">${i+1}</span><span class="rank-name">${esc(c.name)}</span><span class="rank-score">${c.similarity.toFixed(1)}%</span></div>`).join('');
     const topSet=new Set(lastResult.topKeys||[]);
     document.getElementById('trait-compare').innerHTML=AXES.map(a=>{
@@ -236,8 +270,8 @@
     const reasons=AXES.map(a=>{
       const u=lastResult.vector[a.key], c=best.traits[a.key];
       const closeness=1-Math.abs(u-c)/4;
-      const distinct=0.45+0.55*Math.max(Math.abs(u-2),Math.abs(c-2))/2;
-      return {label:a.label,u,c,score:closeness*distinct*(lastResult.axisWeights?.[a.key]||1)};
+      const strength=0.35+0.65*Math.abs(Number(lastResult.direction?.[a.key]||0));
+      return {label:a.label,u,c,score:closeness*strength*(lastResult.axisWeights?.[a.key]||1)};
     }).sort((a,b)=>b.score-a.score).slice(0,6);
     document.getElementById('reason-list').innerHTML=reasons.map(r=>`<span class="reason-pill">${esc(r.label)} · 선호 ${r.u.toFixed(1)} / ${Number(r.c).toFixed(0)}</span>`).join('');
   }
@@ -263,7 +297,9 @@
   function renderCharacterEditor(){
     const c=selectedCharacter(); if(!c) return;
     changedCharacterAxes=new Set();
-    document.getElementById('character-editor').innerHTML=AXES.map(a=>`<div class="trait-control"><div class="trait-control-head"><strong>${esc(a.label)}</strong><span class="trait-value" id="value-${a.key}">${Number(c.traits[a.key]).toFixed(0)}</span></div><input type="range" min="0" max="4" step="1" value="${c.traits[a.key]}" data-axis="${a.key}"></div>`).join('');
+    const pdbType=c.mbti || window.UMA_PDB_MBTI?.[c.name] || '';
+    const ref=pdbType?`<div class="mbti-reference"><strong>PDB MBTI 참고</strong><span>${esc(pdbType)} · 커뮤니티 투표 결과이며 캐릭터 수치의 보조 검증용으로만 사용</span></div>`:'';
+    document.getElementById('character-editor').innerHTML=ref+AXES.map(a=>`<div class="trait-control"><div class="trait-control-head"><strong>${esc(a.label)}</strong><span class="trait-value" id="value-${a.key}">${Number(c.traits[a.key]).toFixed(0)}</span></div><input type="range" min="0" max="4" step="1" value="${c.traits[a.key]}" data-axis="${a.key}"></div>`).join('');
     document.querySelectorAll('#character-editor input[type=range]').forEach(el=>el.addEventListener('input',e=>{
       const key=e.target.dataset.axis; document.getElementById(`value-${key}`).textContent=e.target.value; changedCharacterAxes.add(key);
     }));
@@ -312,19 +348,48 @@
     document.getElementById('match-top-multiplier').value=cfg.topMultiplier;
     document.getElementById('match-neutral-weight').value=cfg.neutralWeight;
     document.getElementById('match-strength-power').value=cfg.strengthPower;
+    document.getElementById('match-directional-blend').value=cfg.directionalBlend;
   }
   document.getElementById('save-match-settings').addEventListener('click',()=>{
     state.settings={
       enabled:document.getElementById('match-weight-enabled').checked,
       topK:clamp(Math.round(Number(document.getElementById('match-top-k').value)||0),0,AXES.length),
-      topMultiplier:clamp(Number(document.getElementById('match-top-multiplier').value)||2,1,5),
-      neutralWeight:clamp(Number(document.getElementById('match-neutral-weight').value)||0.35,0.05,1),
-      strengthPower:clamp(Number(document.getElementById('match-strength-power').value)||1.25,0.3,3)
+      topMultiplier:clamp(Number(document.getElementById('match-top-multiplier').value)||1.7,1,5),
+      neutralWeight:clamp(Number(document.getElementById('match-neutral-weight').value)||0.05,0.01,1),
+      strengthPower:clamp(Number(document.getElementById('match-strength-power').value)||1.35,0.3,3),
+      directionalBlend:clamp(Number(document.getElementById('match-directional-blend').value)||0.55,0,1)
     };
     saveState();
     if(Object.keys(answers).length===state.questions.length) lastResult=calculateResult(); else lastResult=null;
+    document.getElementById('distribution-diagnostic').innerHTML='';
     alert('매칭 가중치 설정을 저장했습니다.');
   });
+
+  function randomLikert(){
+    const r=Math.random();
+    if(r<0.10)return 1; if(r<0.30)return 2; if(r<0.70)return 3; if(r<0.90)return 4; return 5;
+  }
+  function runDistributionDiagnostic(iterations=1200){
+    const box=document.getElementById('distribution-diagnostic');
+    if(!box)return;
+    box.innerHTML='<strong>분포 테스트 계산 중…</strong>';
+    window.setTimeout(()=>{
+      const percentiles=buildCharacterPercentiles();
+      const counts=new Map(state.characters.map(c=>[c.name,0]));
+      for(let i=0;i<iterations;i++){
+        const sim={}; state.questions.forEach(q=>sim[q.id]=randomLikert());
+        const r=calculateResult(sim,percentiles);
+        const name=r.ranked[0]?.name; if(name)counts.set(name,(counts.get(name)||0)+1);
+      }
+      const sorted=[...counts.entries()].filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+      const probs=sorted.map(([,v])=>v/iterations);
+      const effective=Math.exp(-probs.reduce((sum,p)=>sum+(p>0?p*Math.log(p):0),0));
+      const maxShare=probs.length?probs[0]:0;
+      const top10Share=probs.slice(0,10).reduce((a,b)=>a+b,0);
+      box.innerHTML=`<div class="diagnostic-metrics"><span>1위 등장 캐릭터 <b>${sorted.length}/142</b></span><span>유효 다양성 <b>${effective.toFixed(1)}</b></span><span>최다 1위 독점률 <b>${(maxShare*100).toFixed(1)}%</b></span><span>상위 10 집중률 <b>${(top10Share*100).toFixed(1)}%</b></span></div><div class="diagnostic-top">${sorted.slice(0,10).map(([n,v],i)=>`<span>${i+1}. ${esc(n)} ${(v/iterations*100).toFixed(1)}%</span>`).join('')}</div><p>응답 분포는 1/5 각 10%, 2/4 각 20%, 중간 40%로 가정한 ${iterations.toLocaleString()}회 모의 테스트입니다.</p>`;
+    },30);
+  }
+  document.getElementById('run-distribution-test')?.addEventListener('click',()=>runDistributionDiagnostic());
 
   // ---------- import/export ----------
   function download(name,text,type){ const blob=new Blob([text],{type}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000); }

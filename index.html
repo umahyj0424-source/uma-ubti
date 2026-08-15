@@ -28,7 +28,7 @@
       <div class="hero card">
         <div class="eyebrow">142 CHARACTER · 15 TRAITS · 45 QUESTIONS</div>
         <h2>“나는 어떤 캐릭터를 좋아하는가?”</h2>
-        <p class="hero-copy">45개의 상황형 질문에 답하면 15개 성향축으로 선호 벡터를 만들고, 142명의 캐릭터 데이터와 비교해 가장 가까운 캐릭터를 찾습니다.</p>
+        <p class="hero-copy">45개의 상황형 질문에 답하면 15개 성향축으로 선호 방향과 강도를 만들고, 142명의 캐릭터 데이터와 비교해 가장 잘 맞는 캐릭터를 찾습니다.</p>
         <div class="hero-actions">
           <button id="start-test" class="primary large">테스트 시작</button>
           <button id="load-sample" class="ghost">임의 응답으로 결과 미리보기</button>
@@ -84,7 +84,7 @@
 
         <div class="results-grid">
           <section class="card">
-            <div class="section-head"><div><h3>TOP 10</h3><p>강한 선호축을 더 크게 반영한 가중 거리 기준</p></div></div>
+            <div class="section-head"><div><h3>TOP 10</h3><p>강한 선호 방향 + 목표 수치를 함께 반영한 하이브리드 기준</p></div></div>
             <div id="ranking-list" class="ranking-list"></div>
           </section>
           <section class="card">
@@ -107,7 +107,7 @@
     <section id="view-admin" class="view">
       <div class="admin-warning card">
         <strong>데이터 조정 탭</strong>
-        <span>변경값은 이 브라우저의 localStorage에 저장됩니다. 배포본 원본을 바꾸려면 내보낸 JSON/CSV를 프로젝트 파일에 반영하세요.</span>
+        <span>변경값은 이 브라우저의 localStorage에 저장됩니다. 배포본 원본을 바꾸려면 내보낸 JSON/CSV를 프로젝트 파일에 반영하세요. 일부 캐릭터에는 Personality Database의 커뮤니티 MBTI 결과를 보조 참고값으로 표시합니다.</span>
       </div>
 
       <div class="admin-tabs">
@@ -140,19 +140,21 @@
 
 
       <div id="admin-matching" class="admin-panel card">
-        <div class="section-head"><div><h3>매칭 가중치 설정</h3><p>중립적인 캐릭터가 과도하게 유리해지지 않도록, 사용자의 강한 선호축을 더 크게 반영합니다.</p></div></div>
+        <div class="section-head"><div><h3>매칭 가중치 설정</h3><p>중립적인 캐릭터가 과도하게 유리해지지 않도록, 강한 선호의 방향과 캐릭터의 상대적 개성을 함께 반영합니다.</p></div></div>
         <div class="match-settings-grid">
           <label class="setting-field"><span>강한 선호축 가중 사용</span><input id="match-weight-enabled" type="checkbox"></label>
           <label class="setting-field"><span>TOP 선호축 개수</span><input id="match-top-k" type="number" min="0" max="15" step="1"></label>
           <label class="setting-field"><span>TOP 축 추가 배수</span><input id="match-top-multiplier" type="number" min="1" max="5" step="0.1"></label>
-          <label class="setting-field"><span>중립축 최소 가중치</span><input id="match-neutral-weight" type="number" min="0.05" max="1" step="0.05"></label>
+          <label class="setting-field"><span>중립축 최소 가중치</span><input id="match-neutral-weight" type="number" min="0.01" max="1" step="0.01"></label>
           <label class="setting-field"><span>선호 강도 곡선</span><input id="match-strength-power" type="number" min="0.3" max="3" step="0.1"></label>
+          <label class="setting-field"><span>방향 선호 비중 (0~1)</span><input id="match-directional-blend" type="number" min="0" max="1" step="0.05"></label>
         </div>
         <div class="setting-help">
           <strong>현재 계산 방식</strong>
-          <p>사용자 선호값이 2(중립)에서 멀수록 축 가중치가 커집니다. 그중 가장 강한 TOP 축에는 추가 배수를 곱합니다. 낮은 값(예: 충동성 0을 선호)도 높은 값과 동일하게 강한 취향으로 취급합니다.</p>
+          <p>문항 응답을 단순한 “목표 점수”로만 보지 않고, 어떤 방향의 성향을 얼마나 선호했는지 먼저 계산합니다. 각 캐릭터가 142명 중 그 방향에서 얼마나 뚜렷한지도 함께 보며, 기존 목표 수치 거리도 일부 남겨 과도한 극단값 쏠림을 막습니다.</p>
         </div>
-        <button id="save-match-settings" class="primary">매칭 설정 저장</button>
+        <div class="button-row"><button id="save-match-settings" class="primary">매칭 설정 저장</button><button id="run-distribution-test" class="ghost">1,200회 분포 테스트</button></div>
+        <div id="distribution-diagnostic" class="distribution-diagnostic"></div>
       </div>
 
       <div id="admin-io" class="admin-panel card">

@@ -69,3 +69,15 @@ button,input,select,textarea{font:inherit} button{cursor:pointer}.hidden{display
   #view-test .sticky-submit.ready>div{display:none}
   #view-test .sticky-submit.ready .primary{width:100%;padding:14px;font-size:15px}
 }
+
+/* v0.4 matching diagnostics / MBTI reference */
+.mbti-reference{grid-column:1/-1;display:flex;gap:10px;align-items:center;padding:11px 13px;border:1px solid #d9e5ef;background:#f5f9fc;border-radius:11px;margin-bottom:2px}
+.mbti-reference strong{font-size:12px;color:#315a76}.mbti-reference span{font-size:11px;color:var(--muted);line-height:1.5}
+.distribution-diagnostic{margin-top:14px}
+.distribution-diagnostic>strong{display:block;padding:12px 14px;border:1px solid var(--line);border-radius:11px;background:#f7f9fa;font-size:12px}
+.diagnostic-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:9px}
+.diagnostic-metrics span{display:flex;flex-direction:column;gap:3px;border:1px solid var(--line);border-radius:10px;background:#f8fafb;padding:10px;font-size:10px;color:var(--muted)}
+.diagnostic-metrics b{font-size:16px;color:var(--ink)}
+.diagnostic-top{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.diagnostic-top span{padding:7px 9px;border-radius:999px;background:var(--soft);font-size:10px;font-weight:800;color:var(--brand-2)}
+.distribution-diagnostic p{font-size:10px;color:var(--muted);margin:0;line-height:1.5}
+@media(max-width:700px){.diagnostic-metrics{grid-template-columns:1fr 1fr}.mbti-reference{align-items:flex-start;flex-direction:column;gap:4px}}
