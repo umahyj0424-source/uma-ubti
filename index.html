@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>우마무스메 취향 매칭 테스트</title>
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-wrap">
+      <div class="brand-mark">U</div>
+      <div>
+        <h1>우마무스메 취향 매칭 테스트</h1>
+        <p>내 성격이 아니라, 내가 좋아하는 캐릭터의 성향을 찾습니다.</p>
+      </div>
+    </div>
+    <nav class="topnav" aria-label="메인 메뉴">
+      <button class="nav-btn active" data-view="intro">소개</button>
+      <button class="nav-btn" data-view="test">테스트</button>
+      <button class="nav-btn" data-view="results">결과</button>
+      <button class="nav-btn" data-view="admin">데이터 조정</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section id="view-intro" class="view active">
+      <div class="hero card">
+        <div class="eyebrow">142 CHARACTER · 15 TRAITS · 45 QUESTIONS</div>
+        <h2>“나는 어떤 캐릭터를 좋아하는가?”</h2>
+        <p class="hero-copy">45개의 상황형 질문에 답하면 15개 성향축으로 선호 벡터를 만들고, 142명의 캐릭터 데이터와 비교해 가장 가까운 캐릭터를 찾습니다.</p>
+        <div class="hero-actions">
+          <button id="start-test" class="primary large">테스트 시작</button>
+          <button id="load-sample" class="ghost">임의 응답으로 결과 미리보기</button>
+        </div>
+      </div>
+
+      <div class="grid-3 info-grid">
+        <article class="card info-card"><strong>성격검사가 아님</strong><span>사용자 본인이 어떤 사람인지가 아니라, 어떤 성향의 캐릭터에게 끌리는지 측정합니다.</span></article>
+        <article class="card info-card"><strong>문항별 복수 가중치</strong><span>한 질문이 명랑도 1.0 + 외향성 0.2처럼 여러 축에 동시에 영향을 줄 수 있습니다.</span></article>
+        <article class="card info-card"><strong>직접 수정 가능</strong><span>캐릭터 15축 점수와 문항 가중치를 관리자 탭에서 수정하고 JSON/CSV로 저장할 수 있습니다.</span></article>
+      </div>
+
+      <div class="card axis-guide">
+        <div class="section-head"><div><h3>현재 15개 성향축</h3><p>0~4점. 결과 화면에서는 사용자의 선호 벡터와 캐릭터 수치를 직접 비교합니다.</p></div></div>
+        <div id="axis-chips" class="chip-wrap"></div>
+      </div>
+    </section>
+
+    <section id="view-test" class="view">
+      <div class="test-header card">
+        <div>
+          <div class="eyebrow">PREFERENCE TEST</div>
+          <h2>더 끌리는 쪽을 선택해 주세요</h2>
+          <p>가운데를 선택해도 괜찮습니다. 모든 문항에 답하면 결과 버튼이 활성화됩니다.</p>
+        </div>
+        <div class="progress-block">
+          <div class="progress-meta"><span id="progress-text">0 / 45</span><span id="progress-percent">0%</span></div>
+          <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+        </div>
+      </div>
+      <div id="question-list" class="question-list"></div>
+      <div class="sticky-submit">
+        <div><strong id="unanswered-count">45문항 남음</strong><span>모든 문항을 체크해야 결과를 계산합니다.</span></div>
+        <button id="calculate-result" class="primary" disabled>결과 보기</button>
+      </div>
+    </section>
+
+    <section id="view-results" class="view">
+      <div id="results-empty" class="card empty-state">
+        <h2>아직 계산된 결과가 없습니다.</h2>
+        <p>테스트를 완료하면 가장 비슷한 캐릭터와 TOP 10을 확인할 수 있습니다.</p>
+        <button class="primary" data-go="test">테스트하러 가기</button>
+      </div>
+      <div id="results-content" class="hidden">
+        <div class="result-hero card">
+          <div>
+            <div class="eyebrow">BEST MATCH</div>
+            <h2 id="best-name">-</h2>
+            <p id="best-summary">-</p>
+          </div>
+          <div class="match-score"><span id="best-score">0</span><small>취향 일치도</small></div>
+        </div>
+
+        <div class="results-grid">
+          <section class="card">
+            <div class="section-head"><div><h3>TOP 10</h3><p>15개 축의 가중 거리 기준</p></div></div>
+            <div id="ranking-list" class="ranking-list"></div>
+          </section>
+          <section class="card">
+            <div class="section-head"><div><h3>선호 성향 vs 1위 캐릭터</h3><p>막대가 가까울수록 해당 축에서 잘 맞습니다.</p></div></div>
+            <div id="trait-compare" class="trait-compare"></div>
+          </section>
+        </div>
+
+        <section class="card reason-card">
+          <div class="section-head"><div><h3>왜 이 캐릭터가 나왔나?</h3><p>일치도가 높고 결과에 영향이 컸던 축을 우선 표시합니다.</p></div></div>
+          <div id="reason-list" class="reason-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="view-admin" class="view">
+      <div class="admin-warning card">
+        <strong>데이터 조정 탭</strong>
+        <span>변경값은 이 브라우저의 localStorage에 저장됩니다. 배포본 원본을 바꾸려면 내보낸 JSON/CSV를 프로젝트 파일에 반영하세요.</span>
+      </div>
+
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-admin="characters">캐릭터 수치</button>
+        <button class="admin-tab" data-admin="questions">문항 / 가중치</button>
+        <button class="admin-tab" data-admin="io">가져오기 / 내보내기</button>
+      </div>
+
+      <div id="admin-characters" class="admin-panel active card">
+        <div class="admin-toolbar">
+          <label>캐릭터 선택
+            <select id="character-select"></select>
+          </label>
+          <input id="character-search" type="search" placeholder="캐릭터 검색" />
+          <button id="save-character" class="primary">현재 캐릭터 저장</button>
+        </div>
+        <div id="character-editor" class="trait-editor"></div>
+      </div>
+
+      <div id="admin-questions" class="admin-panel card">
+        <div class="question-admin-layout">
+          <div class="question-admin-list-wrap">
+            <div class="admin-toolbar compact"><strong>45개 문항</strong><span>문항을 선택해 오른쪽에서 수정</span></div>
+            <div id="question-admin-list" class="question-admin-list"></div>
+          </div>
+          <div id="question-editor" class="question-editor"></div>
+        </div>
+      </div>
+
+      <div id="admin-io" class="admin-panel card">
+        <div class="io-grid">
+          <div class="io-block"><h3>전체 설정 JSON</h3><p>캐릭터 점수 + 문항 + 설정을 한 번에 저장합니다.</p><div class="button-row"><button id="export-json" class="primary">JSON 내보내기</button><label class="file-btn">JSON 가져오기<input id="import-json" type="file" accept="application/json,.json" /></label></div></div>
+          <div class="io-block"><h3>캐릭터 점수 CSV</h3><p>142명 × 15축 점수만 수정하려면 CSV가 가장 편합니다.</p><div class="button-row"><button id="export-csv" class="primary">CSV 내보내기</button><label class="file-btn">CSV 가져오기<input id="import-csv" type="file" accept="text/csv,.csv" /></label></div></div>
+          <div class="io-block danger"><h3>브라우저 수정값 초기화</h3><p>현재 수정한 캐릭터/문항 데이터를 배포 기본값으로 되돌립니다.</p><button id="reset-data" class="danger-btn">기본값으로 초기화</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">Static HTML / JS · 외부 라이브러리 없이 동작</footer>
+
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/questions.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
